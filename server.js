@@ -16,11 +16,11 @@ if (!API_KEY) {
 }
 
 // Shared helper: call Groq's chat completions endpoint
-async function callGroq(promptText, { jsonMode = false, maxTokens = 4096 } = {}) {
+async function callGroq(promptText, { jsonMode = false, maxTokens = 4096, temperature = 0.4 } = {}) {
     const body = {
         model: MODEL,
         messages: [{ role: "user", content: promptText }],
-        temperature: 0.4,
+        temperature: temperature,
         max_tokens: maxTokens
     };
 
@@ -112,14 +112,18 @@ app.post('/api/full-analyze', async (req, res) => {
     }
 
     try {
-        const prompt = `You are an expert reading-level and curriculum analysis engine for CBSE teachers and parents in India.
+        const prompt = `You are an expert CBSE curriculum specialist and reading-level analyst for teachers and parents in India. You know the actual NCERT syllabus — which specific topics and chapters appear in which CBSE class, subject by subject (e.g. Gauss's Law and electric flux are Class 12 Physics/Electrostatics, not Class 11; trigonometry basics are Class 10 Math; cell structure is Class 9-11 Biology depending on depth).
 
-Analyze the text below and respond with ONLY a single raw JSON object — no markdown fences, no commentary, no preamble.
+Analyze the text below in two steps:
+1. First identify the subject and the specific topic/chapter it belongs to.
+2. Then determine which CBSE class that exact topic is actually taught in per the NCERT syllabus — this matters more than general vocabulary difficulty. A simply-worded sentence about a Class 12 topic is still Class 12 content.
+
+Respond with ONLY a single raw JSON object — no markdown fences, no commentary, no preamble.
 
 Use exactly this schema:
 {
-  "gradeLevel": <integer 1-12, your best estimate of the CBSE Class this text is best suited for>,
-  "gradeReport": "<one or two sentence, teacher-friendly explanation of why this text sits at that class level>",
+  "gradeLevel": <integer 1-12, the CBSE Class this text's actual topic/chapter is taught in per the NCERT syllabus>,
+  "gradeReport": "<one or two sentences: name the subject/topic and state which CBSE class the NCERT syllabus places it in>",
   "classSuitability": [<12 integers, 0-100, one per CBSE Class 1 through 12 in order, representing how suitable this text is for that class>],
   "keyConcepts": ["<3 to 6 short phrases naming the main concepts or topics in the text>"],
   "difficultWords": [{"word": "<the exact word or short phrase as it appears in the text>", "definition": "<a simple, one-sentence, student-friendly definition>"}],
@@ -131,12 +135,13 @@ Rules:
 - Identify 4 to 10 genuinely difficult, advanced, or abstract words/phrases for "difficultWords". Skip this list if the text is already very simple.
 - "gradeLevel" must be a plain integer, not a string or range.
 - "classSuitability" must have exactly 12 integers. The class matching "gradeLevel" should score highest (usually 85-100), with suitability tapering off gradually for classes further away — don't just put one class at 100 and everything else at 0, reflect genuine overlap between neighboring classes.
+- If the text doesn't map to a specific NCERT topic (e.g. generic prose, a story, a news article), fall back to standard reading-level difficulty (vocabulary, sentence complexity, abstraction) to estimate the class.
 - Never wrap the JSON in backticks or add any text outside the JSON object.
 
 Text to analyze:
 """${text}"""`;
 
-        const rawJsonText = await callGroq(prompt, { jsonMode: true, maxTokens: 6000 });
+        const rawJsonText = await callGroq(prompt, { jsonMode: true, maxTokens: 6000, temperature: 0.15 });
 
         let parsed;
         try {
