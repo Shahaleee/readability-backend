@@ -16,11 +16,12 @@ if (!API_KEY) {
 }
 
 // Shared helper: call Groq's chat completions endpoint
-async function callGroq(promptText, { jsonMode = false } = {}) {
+async function callGroq(promptText, { jsonMode = false, maxTokens = 4096 } = {}) {
     const body = {
         model: MODEL,
         messages: [{ role: "user", content: promptText }],
-        temperature: 0.4
+        temperature: 0.4,
+        max_tokens: maxTokens
     };
 
     // Ask Groq to guarantee raw JSON output when we need structured data
@@ -111,30 +112,41 @@ app.post('/api/full-analyze', async (req, res) => {
     }
 
     try {
-        const prompt = `You are an expert reading-level and curriculum analysis engine for teachers and parents.
+        const prompt = `You are an expert reading-level and curriculum analysis engine for CBSE teachers and parents in India.
 
 Analyze the text below and respond with ONLY a single raw JSON object — no markdown fences, no commentary, no preamble.
 
 Use exactly this schema:
 {
-  "gradeLevel": <integer 1-12, your best estimate of the US academic grade required to comfortably read this text>,
-  "gradeReport": "<one or two sentence, teacher-friendly explanation of why this text sits at that grade level>",
+  "gradeLevel": <integer 1-12, your best estimate of the CBSE Class this text is best suited for>,
+  "gradeReport": "<one or two sentence, teacher-friendly explanation of why this text sits at that class level>",
+  "classSuitability": [<12 integers, 0-100, one per CBSE Class 1 through 12 in order, representing how suitable this text is for that class>],
   "keyConcepts": ["<3 to 6 short phrases naming the main concepts or topics in the text>"],
   "difficultWords": [{"word": "<the exact word or short phrase as it appears in the text>", "definition": "<a simple, one-sentence, student-friendly definition>"}],
   "summary": "<a concise 2-4 sentence plain-English summary of the text>",
-  "simplified": "<the full text rewritten in plain, clean paragraphs at roughly one grade level below the estimated gradeLevel, with no markdown formatting>"
+  "simplified": "<the full text rewritten in plain, clean paragraphs at roughly one class level below the estimated gradeLevel, with no markdown formatting>"
 }
 
 Rules:
 - Identify 4 to 10 genuinely difficult, advanced, or abstract words/phrases for "difficultWords". Skip this list if the text is already very simple.
 - "gradeLevel" must be a plain integer, not a string or range.
+- "classSuitability" must have exactly 12 integers. The class matching "gradeLevel" should score highest (usually 85-100), with suitability tapering off gradually for classes further away — don't just put one class at 100 and everything else at 0, reflect genuine overlap between neighboring classes.
 - Never wrap the JSON in backticks or add any text outside the JSON object.
 
 Text to analyze:
 """${text}"""`;
 
-        const rawJsonText = await callGroq(prompt, { jsonMode: true });
-        const parsed = JSON.parse(stripJsonFences(rawJsonText));
+        const rawJsonText = await callGroq(prompt, { jsonMode: true, maxTokens: 6000 });
+
+        let parsed;
+        try {
+            parsed = JSON.parse(stripJsonFences(rawJsonText));
+        } catch (parseErr) {
+            console.error("JSON parse failed. Raw response was:", rawJsonText);
+            const err = new Error("The AI returned a malformed response. Please try again.");
+            err.status = 502;
+            throw err;
+        }
 
         // Light normalization so the frontend can rely on the shape
         parsed.gradeLevel = Math.max(1, Math.min(12, parseInt(parsed.gradeLevel, 10) || 1));
@@ -143,6 +155,24 @@ Text to analyze:
         parsed.gradeReport = parsed.gradeReport || "";
         parsed.summary = parsed.summary || "";
         parsed.simplified = parsed.simplified || "";
+
+        // Validate classSuitability: must be exactly 12 numbers 0-100.
+        // If the AI omitted it or returned something malformed, fall back to
+        // a synthetic bell curve centered on gradeLevel so the UI never breaks.
+        const rawSuitability = Array.isArray(parsed.classSuitability) ? parsed.classSuitability : [];
+        const cleanSuitability = rawSuitability
+            .slice(0, 12)
+            .map(v => Math.max(0, Math.min(100, parseInt(v, 10) || 0)));
+
+        if (cleanSuitability.length === 12 && cleanSuitability.some(v => v > 0)) {
+            parsed.classSuitability = cleanSuitability;
+        } else {
+            parsed.classSuitability = Array.from({ length: 12 }, (_, i) => {
+                const classNum = i + 1;
+                const distance = Math.abs(classNum - parsed.gradeLevel);
+                return Math.max(5, Math.round(100 - distance * 22));
+            });
+        }
 
         res.json(parsed);
     } catch (error) {
