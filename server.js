@@ -112,18 +112,23 @@ app.post('/api/full-analyze', async (req, res) => {
     }
 
     try {
-        const prompt = `You are an expert CBSE curriculum specialist and reading-level analyst for teachers and parents in India. You know the actual NCERT syllabus — which specific topics and chapters appear in which CBSE class, subject by subject (e.g. Gauss's Law and electric flux are Class 12 Physics/Electrostatics, not Class 11; trigonometry basics are Class 10 Math; cell structure is Class 9-11 Biology depending on depth).
+        const prompt = `You are an expert CBSE curriculum analyst and reading-level specialist for teachers and parents in India.
 
 Analyze the text below in two steps:
-1. First identify the subject and the specific topic/chapter it belongs to.
-2. Then determine which CBSE class that exact topic is actually taught in per the NCERT syllabus — this matters more than general vocabulary difficulty. A simply-worded sentence about a Class 12 topic is still Class 12 content.
+1. Identify the general subject and topic area (e.g. "physics — electrostatics", "history — early 20th century economic history", "biology — cell structure").
+2. Estimate which CBSE class that subject/topic area is typically taught in, based on the general difficulty and scope of the concepts involved — not on trying to recall an exact chapter or textbook name.
+
+IMPORTANT — avoid hallucination:
+- Do NOT name a specific chapter title, textbook name, or NCERT book title (e.g. do not say things like "this is Chapter 4 of [book name]"). You cannot reliably verify exact chapter placement, and a wrong specific citation is worse than a general, honest description.
+- In "gradeReport", describe the subject and general topic area in plain words, and state your estimated class — without asserting a specific chapter or book as fact.
+- Reason primarily from genuine conceptual difficulty and vocabulary for that subject, not from a guessed memory of an exact syllabus document.
 
 Respond with ONLY a single raw JSON object — no markdown fences, no commentary, no preamble.
 
 Use exactly this schema:
 {
-  "gradeLevel": <integer 1-12, the CBSE Class this text's actual topic/chapter is taught in per the NCERT syllabus>,
-  "gradeReport": "<one or two sentences: name the subject/topic and state which CBSE class the NCERT syllabus places it in>",
+  "gradeLevel": <integer 1-12, your best estimate of the CBSE Class this text's subject/topic difficulty corresponds to>,
+  "gradeReport": "<one or two sentences: name the general subject/topic area and state your estimated CBSE class, without citing a specific chapter or textbook title>",
   "classSuitability": [<12 integers, 0-100, one per CBSE Class 1 through 12 in order, representing how suitable this text is for that class>],
   "keyConcepts": [{"concept": "<a short phrase naming a main concept or topic in the text>", "explanation": "<a simple, one-sentence explanation of that concept>"}],
   "difficultWords": [{"word": "<the exact word or short phrase as it appears in the text>", "definition": "<a simple, one-sentence, student-friendly definition>"}],
@@ -135,14 +140,13 @@ Rules:
 - Identify 4 to 10 genuinely difficult, advanced, or abstract words/phrases for "difficultWords". Skip this list if the text is already very simple.
 - "gradeLevel" must be a plain integer, not a string or range.
 - "classSuitability" must have exactly 12 integers. The class matching "gradeLevel" should score highest (usually 85-100), with suitability tapering off gradually for classes further away — don't just put one class at 100 and everything else at 0, reflect genuine overlap between neighboring classes.
-- If the text doesn't map to a specific NCERT topic (e.g. generic prose, a story, a news article), fall back to standard reading-level difficulty (vocabulary, sentence complexity, abstraction) to estimate the class.
 - "keyConcepts" must have between 3 and 6 entries, each with its own short "concept" phrase and a one-sentence "explanation" a student could understand.
 - Never wrap the JSON in backticks or add any text outside the JSON object.
 
 Text to analyze:
 """${text}"""`;
 
-        const rawJsonText = await callGroq(prompt, { jsonMode: true, maxTokens: 6000, temperature: 0.15 });
+        const rawJsonText = await callGroq(prompt, { jsonMode: true, maxTokens: 6000, temperature: 0.05 });
 
         let parsed;
         try {
