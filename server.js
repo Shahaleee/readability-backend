@@ -112,34 +112,27 @@ app.post('/api/full-analyze', async (req, res) => {
     }
 
     try {
-        const prompt = `You are an expert CBSE curriculum analyst and reading-level specialist for teachers and parents in India.
+        const prompt = `You are an expert reading-level analyst for teachers and parents.
 
-Analyze the text below in two steps:
-1. Identify the general subject and topic area (e.g. "physics — electrostatics", "history — early 20th century economic history", "biology — cell structure").
-2. Estimate which CBSE class that subject/topic area is typically taught in, based on the general difficulty and scope of the concepts involved — not on trying to recall an exact chapter or textbook name.
-
-IMPORTANT — avoid hallucination:
-- Do NOT name a specific chapter title, textbook name, or NCERT book title (e.g. do not say things like "this is Chapter 4 of [book name]"). You cannot reliably verify exact chapter placement, and a wrong specific citation is worse than a general, honest description.
-- In "gradeReport", describe the subject and general topic area in plain words, and state your estimated class — without asserting a specific chapter or book as fact.
-- Reason primarily from genuine conceptual difficulty and vocabulary for that subject, not from a guessed memory of an exact syllabus document.
+Analyze the text below and estimate its approximate school grade level (1-12) based on vocabulary difficulty, sentence complexity, and how abstract or advanced the concepts are — general reading-level analysis, not tied to any specific country's curriculum.
 
 Respond with ONLY a single raw JSON object — no markdown fences, no commentary, no preamble.
 
 Use exactly this schema:
 {
-  "gradeLevel": <integer 1-12, your best estimate of the CBSE Class this text's subject/topic difficulty corresponds to>,
-  "gradeReport": "<one or two sentences: name the general subject/topic area and state your estimated CBSE class, without citing a specific chapter or textbook title>",
-  "classSuitability": [<12 integers, 0-100, one per CBSE Class 1 through 12 in order, representing how suitable this text is for that class>],
+  "gradeLevel": <integer 1-12, your best estimate of the school grade this text is suited for>,
+  "gradeReport": "<one or two sentences explaining why this text sits at that grade level, based on its vocabulary and conceptual difficulty>",
+  "classSuitability": [<12 integers, 0-100, one per Grade 1 through 12 in order, representing how suitable this text is for that grade>],
   "keyConcepts": [{"concept": "<a short phrase naming a main concept or topic in the text>", "explanation": "<a simple, one-sentence explanation of that concept>"}],
   "difficultWords": [{"word": "<the exact word or short phrase as it appears in the text>", "definition": "<a simple, one-sentence, student-friendly definition>"}],
   "summary": "<a concise 2-4 sentence plain-English summary of the text>",
-  "simplified": "<the full text rewritten in plain, clean paragraphs at roughly one class level below the estimated gradeLevel, with no markdown formatting>"
+  "simplified": "<the full text rewritten in plain, clean paragraphs at roughly one grade level below the estimated gradeLevel, with no markdown formatting>"
 }
 
 Rules:
 - Identify 4 to 10 genuinely difficult, advanced, or abstract words/phrases for "difficultWords". Skip this list if the text is already very simple.
 - "gradeLevel" must be a plain integer, not a string or range.
-- "classSuitability" must have exactly 12 integers. The class matching "gradeLevel" should score highest (usually 85-100), with suitability tapering off gradually for classes further away — don't just put one class at 100 and everything else at 0, reflect genuine overlap between neighboring classes.
+- "classSuitability" must have exactly 12 integers. The grade matching "gradeLevel" should score highest (usually 85-100), with suitability tapering off gradually for grades further away — don't just put one grade at 100 and everything else at 0, reflect genuine overlap between neighboring grades.
 - "keyConcepts" must have between 3 and 6 entries, each with its own short "concept" phrase and a one-sentence "explanation" a student could understand.
 - Never wrap the JSON in backticks or add any text outside the JSON object.
 
