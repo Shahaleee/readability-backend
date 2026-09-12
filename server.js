@@ -125,7 +125,7 @@ Use exactly this schema:
   "gradeLevel": <integer 1-12, the CBSE Class this text's actual topic/chapter is taught in per the NCERT syllabus>,
   "gradeReport": "<one or two sentences: name the subject/topic and state which CBSE class the NCERT syllabus places it in>",
   "classSuitability": [<12 integers, 0-100, one per CBSE Class 1 through 12 in order, representing how suitable this text is for that class>],
-  "keyConcepts": ["<3 to 6 short phrases naming the main concepts or topics in the text>"],
+  "keyConcepts": [{"concept": "<a short phrase naming a main concept or topic in the text>", "explanation": "<a simple, one-sentence explanation of that concept>"}],
   "difficultWords": [{"word": "<the exact word or short phrase as it appears in the text>", "definition": "<a simple, one-sentence, student-friendly definition>"}],
   "summary": "<a concise 2-4 sentence plain-English summary of the text>",
   "simplified": "<the full text rewritten in plain, clean paragraphs at roughly one class level below the estimated gradeLevel, with no markdown formatting>"
@@ -136,6 +136,7 @@ Rules:
 - "gradeLevel" must be a plain integer, not a string or range.
 - "classSuitability" must have exactly 12 integers. The class matching "gradeLevel" should score highest (usually 85-100), with suitability tapering off gradually for classes further away — don't just put one class at 100 and everything else at 0, reflect genuine overlap between neighboring classes.
 - If the text doesn't map to a specific NCERT topic (e.g. generic prose, a story, a news article), fall back to standard reading-level difficulty (vocabulary, sentence complexity, abstraction) to estimate the class.
+- "keyConcepts" must have between 3 and 6 entries, each with its own short "concept" phrase and a one-sentence "explanation" a student could understand.
 - Never wrap the JSON in backticks or add any text outside the JSON object.
 
 Text to analyze:
@@ -155,7 +156,19 @@ Text to analyze:
 
         // Light normalization so the frontend can rely on the shape
         parsed.gradeLevel = Math.max(1, Math.min(12, parseInt(parsed.gradeLevel, 10) || 1));
-        parsed.keyConcepts = Array.isArray(parsed.keyConcepts) ? parsed.keyConcepts : [];
+
+        const rawConcepts = Array.isArray(parsed.keyConcepts) ? parsed.keyConcepts : [];
+        parsed.keyConcepts = rawConcepts.map(item => {
+            if (typeof item === 'string') {
+                // Fallback in case the model ever slips back to plain strings
+                return { concept: item, explanation: "" };
+            }
+            return {
+                concept: item?.concept || "",
+                explanation: item?.explanation || ""
+            };
+        }).filter(item => item.concept);
+
         parsed.difficultWords = Array.isArray(parsed.difficultWords) ? parsed.difficultWords : [];
         parsed.gradeReport = parsed.gradeReport || "";
         parsed.summary = parsed.summary || "";
