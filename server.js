@@ -248,7 +248,85 @@ Text to analyze:
 });
 
 // ==========================================
-// 3. ENDPOINT: AI VALIDATION GATEKEEPER
+// 3. ENDPOINT: COMPREHENSION QUIZ GENERATOR
+// ==========================================
+app.post('/api/quiz', async (req, res) => {
+    const { text, targetGrade } = req.body;
+
+    if (!API_KEY) {
+        return res.status(500).json({ error: "Backend configuration error: GROQ_API_KEY is missing." });
+    }
+    if (!text || !text.trim()) {
+        return res.status(400).json({ error: "No text provided for quiz generation." });
+    }
+
+    const grade = Math.max(1, Math.min(12, parseInt(targetGrade, 10) || 6));
+
+    try {
+        const prompt = `You are an expert teacher writing a reading comprehension quiz for Grade ${grade} students.
+
+Write exactly 5 multiple-choice questions based on the text below. Each question tests genuine understanding of the passage — not trivia the student could guess without reading it. Word the questions and answer choices at a Grade ${grade} reading level.
+
+Respond with ONLY a single raw JSON object — no markdown fences, no commentary, no preamble.
+
+Use exactly this schema:
+{
+  "questions": [
+    {
+      "question": "<the question text>",
+      "options": ["<option A>", "<option B>", "<option C>", "<option D>"],
+      "correctIndex": <integer 0-3, the index of the correct option>,
+      "explanation": "<one short sentence explaining why that answer is correct>"
+    }
+  ]
+}
+
+Rules:
+- Exactly 5 questions, each with exactly 4 options.
+- Only one option per question should be correct.
+- Keep questions and options concise — one sentence each where possible.
+- Never wrap the JSON in backticks or add any text outside the JSON object.
+
+Text:
+"""${text}"""`;
+
+        const rawJsonText = await callGroq(prompt, { jsonMode: true, maxTokens: 2500, temperature: 0.4 });
+
+        let parsed;
+        try {
+            parsed = JSON.parse(stripJsonFences(rawJsonText));
+        } catch (parseErr) {
+            const err = new Error("The AI returned a malformed quiz. Please try again.");
+            err.status = 502;
+            throw err;
+        }
+
+        const questions = Array.isArray(parsed.questions) ? parsed.questions : [];
+        const cleanQuestions = questions
+            .filter(q => q && Array.isArray(q.options) && q.options.length === 4)
+            .map(q => ({
+                question: q.question || "",
+                options: q.options,
+                correctIndex: Math.max(0, Math.min(3, parseInt(q.correctIndex, 10) || 0)),
+                explanation: q.explanation || ""
+            }))
+            .slice(0, 5);
+
+        if (cleanQuestions.length === 0) {
+            const err = new Error("The AI didn't return any usable quiz questions. Please try again.");
+            err.status = 502;
+            throw err;
+        }
+
+        res.json({ questions: cleanQuestions });
+    } catch (error) {
+        console.error("Quiz Generation Error:", error);
+        res.status(error.status || 500).json({ error: error.message || "Failed to generate quiz." });
+    }
+});
+
+// ==========================================
+// 4. ENDPOINT: AI VALIDATION GATEKEEPER
 // ==========================================
 app.post('/api/validate', async (req, res) => {
     const { text } = req.body;
