@@ -139,16 +139,67 @@ Rules:
 Text to analyze:
 """${text}"""`;
 
-        const rawJsonText = await callGroq(prompt, { jsonMode: true, maxTokens: 6000, temperature: 0.05 });
+        // Run 3 independent analyses in parallel and combine them (self-consistency
+        // voting). This directly reduces run-to-run flakiness on borderline texts —
+        // instead of trusting one roll of the dice, we take the median grade and
+        // average the suitability spread across three samples.
+        const ENSEMBLE_SIZE = 3;
+        const rawResponses = await Promise.allSettled(
+            Array.from({ length: ENSEMBLE_SIZE }, () =>
+                callGroq(prompt, { jsonMode: true, maxTokens: 6000, temperature: 0.2 })
+            )
+        );
 
-        let parsed;
-        try {
-            parsed = JSON.parse(stripJsonFences(rawJsonText));
-        } catch (parseErr) {
-            console.error("JSON parse failed. Raw response was:", rawJsonText);
+        const candidates = [];
+        for (const result of rawResponses) {
+            if (result.status !== 'fulfilled') continue;
+            try {
+                candidates.push(JSON.parse(stripJsonFences(result.value)));
+            } catch (parseErr) {
+                console.error("Ensemble member failed to parse, skipping it:", result.value);
+            }
+        }
+
+        if (candidates.length === 0) {
             const err = new Error("The AI returned a malformed response. Please try again.");
             err.status = 502;
             throw err;
+        }
+
+        // Median gradeLevel across whichever candidates succeeded
+        const grades = candidates
+            .map(c => Math.max(1, Math.min(12, parseInt(c.gradeLevel, 10) || 1)))
+            .sort((a, b) => a - b);
+        const medianGrade = grades[Math.floor(grades.length / 2)];
+
+        // Use the candidate whose own gradeLevel is closest to the median for all
+        // the qualitative text fields (report, concepts, words, summary, simplified)
+        // — averaging prose across samples doesn't make sense, so we just pick the
+        // most "typical" one.
+        let parsed = candidates[0];
+        let bestDiff = Infinity;
+        for (const c of candidates) {
+            const g = Math.max(1, Math.min(12, parseInt(c.gradeLevel, 10) || 1));
+            const diff = Math.abs(g - medianGrade);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                parsed = c;
+            }
+        }
+        parsed.gradeLevel = medianGrade;
+
+        // Average classSuitability elementwise across every candidate that returned
+        // a valid 12-length array — smooths out per-run noise in the ring/legend.
+        const validSuitabilities = candidates
+            .map(c => Array.isArray(c.classSuitability)
+                ? c.classSuitability.slice(0, 12).map(v => Math.max(0, Math.min(100, parseInt(v, 10) || 0)))
+                : null)
+            .filter(arr => arr && arr.length === 12);
+
+        if (validSuitabilities.length > 0) {
+            parsed.classSuitability = Array.from({ length: 12 }, (_, i) =>
+                Math.round(validSuitabilities.reduce((sum, arr) => sum + arr[i], 0) / validSuitabilities.length)
+            );
         }
 
         // Light normalization so the frontend can rely on the shape
